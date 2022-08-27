@@ -4,10 +4,11 @@
 
 import { AxiosRequestConfig, AxiosPromise, AxiosResponse } from './types'
 import { parseHeaders } from './helpers/headers'
+import { createError } from './helpers/error'
 
 export default function xhr(config: AxiosRequestConfig): AxiosPromise {
-  return new Promise(resolve => {
-    const { data = null, method = 'get', url, headers, responseType } = config
+  return new Promise((resolve, reject) => {
+    const { data = null, method = 'get', url, headers, responseType, timeout } = config
 
     const request = new XMLHttpRequest()
 
@@ -20,6 +21,11 @@ export default function xhr(config: AxiosRequestConfig): AxiosPromise {
       if (request.readyState !== 4) {
         return
       }
+
+      if (request.status === 0) {
+        return
+      }
+
       const responseHeaders = parseHeaders(request.getAllResponseHeaders())
       const responseData =
         request.responseType && request.responseType !== 'text'
@@ -34,7 +40,23 @@ export default function xhr(config: AxiosRequestConfig): AxiosPromise {
         config,
         request
       }
-      resolve(response)
+      handleResponse(response)
+    }
+
+    function handleResponse(response: AxiosResponse) {
+      if ((response.status >= 200 && response.status < 300) || response.status === 304) {
+        resolve(response)
+      } else {
+        reject(
+          createError(
+            `Request failed with status code ${response.status}`,
+            config,
+            null,
+            request,
+            response
+          )
+        )
+      }
     }
 
     //  设置请求头
@@ -47,6 +69,22 @@ export default function xhr(config: AxiosRequestConfig): AxiosPromise {
         request.setRequestHeader(name, headers[name])
       }
     })
+
+    // 请求异常处理
+    request.onerror = () => {
+      reject(createError('Network Error', config, null, request))
+    }
+
+    // 请求超时处理
+    if (timeout) {
+      request.timeout = timeout
+    }
+    request.ontimeout = () => {
+      reject(
+        createError(`Timeout of ${config.timeout} ms exceeded`, config, 'ECONNABORTED', request)
+      )
+    }
+
     request.send(data)
   })
 }
